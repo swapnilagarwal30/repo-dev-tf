@@ -1,0 +1,2 @@
+variable "rgvar" {}
+# variable "savar" {}
