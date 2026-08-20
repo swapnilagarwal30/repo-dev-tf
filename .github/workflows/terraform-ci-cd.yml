@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'feature/**'
+
   pull_request:
     types:
       - opened
@@ -20,9 +21,13 @@ env:
 
 jobs:
 
+  # ============================================================
+  # TERRAFORM PLAN
+  # ============================================================
+
   terraform-plan:
     name: Terraform Plan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     env:
       ARM_USE_OIDC: true
@@ -32,78 +37,165 @@ jobs:
 
     steps:
 
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # Terraform
+      # --------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform init -input=false
+        shell: pwsh
+        run: |
+          terraform init -input=false
+
+      # --------------------------------------------------------
+      # Terraform Validate
+      # --------------------------------------------------------
 
       - name: Terraform Validate
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform validate
+        shell: pwsh
+        run: |
+          terraform validate
+
+      # --------------------------------------------------------
+      # Terraform Plan
+      # --------------------------------------------------------
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -input=false
+        shell: pwsh
+        run: |
+          terraform plan -input=false
+
+
+  # ============================================================
+  # CREATE PULL REQUEST
+  # Runs only when code is pushed to feature/**
+  # ============================================================
 
   create-pr:
     name: Create Pull Request
     if: github.event_name == 'push'
     needs: terraform-plan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
 
       - name: Create Pull Request
+        shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
         run: |
-          BRANCH="${{ github.ref_name }}"
 
-          EXISTING_PR=$(gh pr list \
-            --repo "${{ github.repository }}" \
-            --head "$BRANCH" \
-            --base main \
-            --state open \
-            --json number \
-            --jq '.[0].number')
+          # ----------------------------------------------------
+          # Get feature branch name
+          # ----------------------------------------------------
 
-          if [ -n "$EXISTING_PR" ]; then
-            echo "Pull Request already exists: #$EXISTING_PR"
-          else
-            gh pr create \
-              --repo "${{ github.repository }}" \
-              --base main \
-              --head "$BRANCH" \
-              --title "Terraform changes: $BRANCH" \
+          $BRANCH = "${{ github.ref_name }}"
+
+          Write-Host "Feature Branch: $BRANCH"
+
+          # ----------------------------------------------------
+          # Check whether an open PR already exists
+          # ----------------------------------------------------
+
+          $EXISTING_PR = gh pr list `
+            --repo "${{ github.repository }}" `
+            --head "$BRANCH" `
+            --base main `
+            --state open `
+            --json number `
+            --jq '.[0].number'
+
+          if (-not [string]::IsNullOrWhiteSpace($EXISTING_PR)) {
+
+            Write-Host "Pull Request already exists: #$EXISTING_PR"
+
+          }
+          else {
+
+            # --------------------------------------------------
+            # Create Pull Request
+            # --------------------------------------------------
+
+            gh pr create `
+              --repo "${{ github.repository }}" `
+              --base main `
+              --head "$BRANCH" `
+              --title "Terraform changes: $BRANCH" `
               --body "Terraform Plan completed successfully. Please review and approve this Pull Request."
 
-            echo "Pull Request created successfully."
-          fi
+            Write-Host "Pull Request created successfully."
+
+          }
+
+
+  # ============================================================
+  # ENABLE AUTO MERGE
+  #
+  # This does NOT immediately merge the PR.
+  #
+  # GitHub will wait for:
+  #   1. Required reviewers
+  #   2. Required status checks
+  #   3. Branch protection rules
+  #
+  # Once all requirements are satisfied, GitHub merges automatically.
+  # ============================================================
 
   enable-auto-merge:
     name: Enable Auto Merge
-    if: github.event_name == 'pull_request'
+
+    if: >
+      github.event_name == 'pull_request' &&
+      (
+        github.event.action == 'opened' ||
+        github.event.action == 'synchronize' ||
+        github.event.action == 'reopened'
+      )
+
     needs: terraform-plan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
 
       - name: Enable Auto Merge
+        shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number }}"
 
-          echo "Enabling auto merge for PR #$PR_NUMBER"
+          # ----------------------------------------------------
+          # Get PR number
+          # ----------------------------------------------------
 
-          gh pr merge "$PR_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --auto \
+          $PR_NUMBER = "${{ github.event.pull_request.number }}"
+
+          Write-Host "Pull Request Number: #$PR_NUMBER"
+
+          # ----------------------------------------------------
+          # Enable GitHub Auto Merge
+          # ----------------------------------------------------
+
+          gh pr merge "$PR_NUMBER" `
+            --repo "${{ github.repository }}" `
+            --auto `
             --squash
 
-          echo "Auto merge enabled."
+          Write-Host "Auto merge enabled for PR #$PR_NUMBER."
