@@ -22,7 +22,7 @@ jobs:
 
   terraform-plan:
     name: Terraform Plan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     env:
       ARM_USE_OIDC: true
@@ -54,7 +54,7 @@ jobs:
     name: Create Pull Request
     if: github.event_name == 'push'
     needs: terraform-plan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
 
@@ -89,7 +89,7 @@ jobs:
     name: Enable Auto Merge
     if: github.event_name == 'pull_request'
     needs: terraform-plan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
 
